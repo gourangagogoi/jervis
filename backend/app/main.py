@@ -17,7 +17,8 @@ from . import engine as E, simulator as S, explain
 from .db import DB
 
 app = FastAPI(title="J.A.R.V.I.S. Nexus")
-db = DB(os.environ.get("NEXUS_DB", "nexus.db"))
+default_db = "/tmp/nexus.db" if os.environ.get("VERCEL") else "nexus.db"
+db = DB(os.environ.get("NEXUS_DB", default_db))
 EN = E.Engine()
 
 class Hub:

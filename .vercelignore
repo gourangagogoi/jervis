@@ -1,0 +1,11 @@
+.git
+.venv
+backend/.venv
+backend/nexus.db
+backend/nexus.db-*
+backend/tests
+frontend/node_modules
+frontend/dist
+__pycache__
+**/__pycache__
+*.pyc
