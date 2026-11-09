@@ -4,16 +4,16 @@ from .engine import normalize, SERVICES
 
 rnd = random.Random(42)
 MSG = {
-    "db_conn_error": ("connection pool exhausted", "CRITICAL"),
-    "high_latency": ("response time above SLO", "ERROR"),
-    "auth_timeout": ("authentication timeout", "ERROR"),
-    "auth_failure": ("token validation failed", "ERROR"),
-    "login_failed": ("login attempt failed", "ERROR"),
-    "txn_failed": ("transaction failed", "ERROR"),
-    "svc_timeout": ("upstream timeout", "ERROR"),
-    "req_ok": ("request handled", "INFO"),
-    "txn_ok": ("transaction settled", "INFO"),
-    "cache_hit": ("cache hit", "INFO"),
+    "db_conn_error": ("Database connection pool exhausted", "CRITICAL"),
+    "high_latency": ("Request latency exceeded the payment API SLO", "ERROR"),
+    "auth_timeout": ("Token validation timed out waiting for Auth Service", "ERROR"),
+    "auth_failure": ("Auth Service rejected token validation", "ERROR"),
+    "login_failed": ("Login request failed while contacting Auth Service", "ERROR"),
+    "txn_failed": ("Payment authorization failed after a dependency timeout", "ERROR"),
+    "svc_timeout": ("Partner request exceeded the upstream timeout", "ERROR"),
+    "req_ok": ("Payment API request completed", "INFO"),
+    "txn_ok": ("Payment transaction settled", "INFO"),
+    "cache_hit": ("Response served from cache", "INFO"),
 }
 ACTIVE = {"fault": None, "start": 0, "duration": 90}
 
@@ -34,9 +34,22 @@ def fault_state():
 def _ev(svc, et, ts, latency=None, code=None, src="stream"):
     sev, msg = MSG.get(et, ("event", "INFO"))[1], MSG.get(et, (et, "event"))[0]
     md = {}
-    if latency is not None: md["latency_ms"] = int(latency)
-    if code: md["error_code"] = code
-    return normalize(svc, sev, et, f"{svc}: {msg}", ts, src, md)
+    if latency is not None:
+        latency = max(1, int(latency))
+        md["latency_ms"] = latency
+        if et == "high_latency":
+            md["slo_ms"] = 500
+            msg = f"p95 latency reached {latency} ms (500 ms SLO)"
+        elif et in ("auth_timeout", "svc_timeout"):
+            md["timeout_ms"] = 2000 if et == "auth_timeout" else 5000
+            msg = f"{msg} after {latency} ms"
+    if et == "db_conn_error":
+        md.update({"pool_size": 120, "active_connections": 120, "waiting_requests": 14})
+        msg = "Connection pool exhausted: 120/120 active; 14 requests waiting"
+    if code:
+        md["error_code"] = code
+        msg = f"{msg} ({code})"
+    return normalize(svc, sev, et, msg, ts, src, md)
 
 def normal_tick(now, n_events=True):
     """Calm background traffic — builds the baseline."""
@@ -45,9 +58,17 @@ def normal_tick(now, n_events=True):
         if rnd.random() < .35:
             et = rnd.choice(["req_ok", "req_ok", "txn_ok", "cache_hit", "high_latency"])
             lat = rnd.gauss(170, 40) if et == "high_latency" else rnd.gauss(120, 30)
-            out.append(_ev(svc, et, now, latency=max(lat, 40)))
+            if et == "high_latency":
+                # Routine latency samples stay informational; only abnormal latency is an error.
+                out.append(normalize(svc, "INFO", "req_ok",
+                                     f"Request completed in {int(max(lat, 40))} ms",
+                                     now, "stream", {"latency_ms": int(max(lat, 40))}))
+            else:
+                out.append(_ev(svc, et, now, latency=max(lat, 40)))
         if rnd.random() < .015:  # rare baseline warn
-            out.append(normalize(svc, "WARN", "generic_warn", f"{svc}: transient hiccup", now, "stream"))
+            out.append(normalize(svc, "WARN", "generic_warn",
+                                 "Intermittent upstream retry recovered on second attempt",
+                                 now, "stream"))
     return out
 
 def fault_tick(now, elapsed):
@@ -70,8 +91,9 @@ def fault_tick(now, elapsed):
         # red herring: noisy but unrelated Bank Simulator warnings
         if elapsed > 5 and rnd.random() < .6:
             out.append(normalize("bank-simulator", "WARN", "high_latency",
-                                 "bank-simulator: cache eviction spike", now, "stream",
-                                 {"latency_ms": int(rnd.gauss(950, 120))}))
+                                 "Partner cache eviction rate elevated; authorization latency remains below timeout",
+                                 now, "stream", {"latency_ms": int(rnd.gauss(950, 120)),
+                                                  "cache_evictions_per_min": rnd.randint(160, 240)}))
     elif f == "bank_simulator_timeout":
         for _ in range(rnd.randint(2, 3)):
             out.append(_ev("bank-simulator", "svc_timeout", now, latency=rnd.gauss(6100, 900), code="BANK-504"))

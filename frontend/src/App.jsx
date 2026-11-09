@@ -8,10 +8,21 @@ const MD = s => s.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((p, i) =>
     : p.startsWith('`') ? <code key={i}>{p.slice(1, -1)}</code> : p)
 
 const SEV_COLOR = { INFO: '#3a3d44', WARN: '#f2d55b', ERROR: '#ffa94d', CRITICAL: '#ff5d5d' }
+const SERVICE_LABEL = {
+  database: 'Database', 'bank-simulator': 'Bank Simulator', 'auth-service': 'Auth Service',
+  'transaction-service': 'Transactions', 'payment-api': 'Payment API',
+}
+const EVENT_LABEL = {
+  db_conn_error: 'Connection pool', high_latency: 'High latency', auth_timeout: 'Auth timeout',
+  auth_failure: 'Auth failure', login_failed: 'Login failed', txn_failed: 'Payment failed',
+  svc_timeout: 'Partner timeout', req_ok: 'Request completed', txn_ok: 'Payment settled',
+  cache_hit: 'Cache hit', generic_warn: 'Recovered retry',
+}
+const serviceName = service => SERVICE_LABEL[service] || service.replaceAll('-', ' ')
 const FAULTS = [
-  ['db_pool_exhaustion', 'DB connection pool exhaustion', 'Main scenario · includes a red herring'],
-  ['bank_simulator_timeout', 'Bank Simulator timeout', 'Engine must NOT blame the database'],
-  ['auth_outage', 'Auth outage', 'Engine must blame Auth Service'],
+  ['db_pool_exhaustion', 'Database connection pool', 'Connection saturation affects checkout and payments'],
+  ['bank_simulator_timeout', 'Bank Simulator timeout', 'Partner authorization requests begin timing out'],
+  ['auth_outage', 'Auth Service outage', 'Token checks fail and customer sign-ins are affected'],
 ]
 
 function ReactorMark() {
@@ -52,14 +63,14 @@ function RootCausePanel({ incident, onHighlight }) {
       <div className="rc-head">
         <Ring pct={top.confidence} />
         <div>
-          <div className="rc-label">SUSPECTED ROOT CAUSE</div>
-          <div className="rc-name">{top.service}</div>
-          <div className="rc-conf">{top.max_severity} · {top.alerts} anomalous alerts · evidence {top.evidence_event_ids.slice(0, 2).join(', ')}</div>
+          <div className="rc-label">Likely cause</div>
+          <div className="rc-name">{serviceName(top.service)}</div>
+          <div className="rc-conf">{top.max_severity.toLowerCase()} · {top.alerts} unusual alerts · evidence {top.evidence_event_ids.slice(0, 2).join(', ')}</div>
         </div>
       </div>
       {p.name && <div className="pattern"><b>{p.name}</b><span>{p.why}</span></div>}
       <div className="formula">
-        <div className="sec-title">CONFIDENCE FORMULA — EXPLAINABLE</div>
+        <div className="sec-title">What supports this diagnosis</div>
         {F.map(([label, k, w]) => (
           <div key={k} className="frow">
             <span className="flabel">{label} <em>×{w}%</em></span>
@@ -68,25 +79,25 @@ function RootCausePanel({ incident, onHighlight }) {
           </div>
         ))}
       </div>
-      <div className="sec-title">ALTERNATIVE HYPOTHESES</div>
+      <div className="sec-title">Other possible causes</div>
       {incident.candidates.slice(1, 3).map(c => (
         <div key={c.service} className="alt" onMouseEnter={() => onHighlight(c.service)}>
-          <span className="alt-name">{c.service}</span><span className="alt-conf">{c.confidence}%</span>
+          <span className="alt-name">{serviceName(c.service)}</span><span className="alt-conf">{c.confidence}%</span>
           <div className="alt-ev">{c.for.length ? 'for: ' + c.for.join(', ') : ''}{c.against.length ? ' · against: ' + c.against.join(', ') : ''}</div>
         </div>
       ))}
       {incident.unrelated_noise.length > 0 && (
-        <div className="noise">Ranked out as unrelated noise: <b>{incident.unrelated_noise.join(', ')}</b> — noisy, but no affected dependents.</div>
+        <div className="noise">Unrelated alerts: <b>{incident.unrelated_noise.map(serviceName).join(', ')}</b>. They do not explain the affected services.</div>
       )}
-      <div className="sec-title">IMPACT</div>
+      <div className="sec-title">Estimated impact</div>
       <div className="impact">
         <div><b>{imp.directly_affected.length + imp.downstream.length}</b><span>services affected</span></div>
         <div><b>~{imp.est_users_impacted}</b><span>users impacted</span></div>
         <div><b>{imp.failed_transactions}</b><span>failed txns</span></div>
         <div><b>{imp.failed_logins}</b><span>failed logins</span></div>
       </div>
-      {p.actions && <>
-        <div className="sec-title">RECOMMENDED ACTIONS</div>
+      {p.actions?.length > 0 && <>
+        <div className="sec-title">Suggested next steps</div>
         <ol className="actions">{p.actions.map((a, i) => <li key={i}>{a}</li>)}</ol>
       </>}
     </div>
@@ -101,9 +112,9 @@ function Timeline({ incident, onHighlight }) {
         <div key={i} className={`trow ${t.trigger ? 'trigger' : ''}`} onMouseEnter={() => onHighlight(t.service)}>
           <span className="tdot" style={{ background: SEV_COLOR[t.severity] }} />
           <span className="ttime">{fmt(t.at)}</span>
-          <span className="tsvc">{t.service}</span>
-          <span className="ttype">{t.event_type}</span>
-          <span className="tlink">{t.trigger ? '⚡ TRIGGER' : t.caused_by ? `← caused by ${t.caused_by}` : ''}</span>
+          <span className="tsvc">{serviceName(t.service)}</span>
+          <span className="ttype">{EVENT_LABEL[t.event_type] || t.event_type.replaceAll('_', ' ')}</span>
+          <span className="tlink">{t.trigger ? 'Started here' : t.caused_by ? `← after ${serviceName(t.caused_by)}` : ''}</span>
           <code className="tid">{t.event_id}</code>
         </div>
       ))}
@@ -159,38 +170,68 @@ export default function App() {
   return (
     <div className="app">
       <header>
-        <div className="brand">J.A.R.V.I.S.<span> NEXUS</span></div>
-        <div className="tagline">47 scattered alerts → one explained incident</div>
+        <div className="brand">J.A.R.V.I.S.<span> Nexus</span></div>
+        <div className="tagline">Correlate alerts. Find the cause.</div>
         <div className="chips">
-          <div className="chip"><b>{metrics.alerts_in}</b><span>alerts in</span></div>
-          <div className="chip accent"><b>{metrics.incidents_out}</b><span>incidents out</span></div>
+          <div className="chip"><b>{metrics.alerts_in}</b><span>alerts received</span></div>
+          <div className="chip accent"><b>{metrics.incidents_out}</b><span>incidents</span></div>
           <div className="chip"><b>{metrics.noise_reduction_pct}%</b><span>noise reduction</span></div>
           <div className="chip"><b>{metrics.time_to_root_cause_s != null ? metrics.time_to_root_cause_s + 's' : '—'}</b><span>to root cause</span></div>
         </div>
-        <div className={`status ${fault ? 'bad' : 'ok'}`}>{fault ? 'FAULT ACTIVE' : 'ALL SYSTEMS NOMINAL'}</div>
+        <div className="header-actions">
+          <div className={`status ${fault ? 'bad' : 'ok'}`}>{fault ? 'Incident active' : 'All systems nominal'}</div>
+          <div className="assistant-dock">
+            {chat.open && <section className="chat" aria-label="Ask J.A.R.V.I.S.">
+              <div className="chat-head">
+                <div>J.A.R.V.I.S. AI assistant<span className="muted chat-subtitle">{chat.msgs.length ? ` · ${chat.msgs.filter(m => !m.me).at(-1)?.mode === 'llm' ? 'grounded AI' : 'grounded assistant'}` : ' · Answers from incident findings'}</span></div>
+                <button className="chat-close" type="button" aria-label="Close assistant" onClick={() => setChat(c => ({ ...c, open: false }))}>×</button>
+              </div>
+              <div className="chat-body" id="chat-body">
+                {chat.msgs.map((m, i) => <div key={i} className={`msg ${m.me ? 'me' : ''}`}>{MD(m.text)}</div>)}
+                {chat.busy && <div className="msg muted">analysing findings…</div>}
+                <div className="sugs">
+                  {['What should I check first?', 'What is the root cause?', 'Which services were affected?', 'Show the timeline', 'How is confidence computed?'].map(s =>
+                    <button key={s} onClick={() => ask(s)} disabled={chat.busy}>{s}</button>)}
+                </div>
+                <form onSubmit={e => { e.preventDefault(); const v = e.target[0].value.trim(); if (v) { ask(v); e.target.reset() } }}>
+                  <input placeholder="Ask about the incident…" disabled={chat.busy} />
+                </form>
+              </div>
+            </section>}
+            <button className={`assistant-launcher ${chat.open ? 'active' : ''}`} type="button"
+              aria-label={chat.open ? 'Close J.A.R.V.I.S. AI assistant' : 'Open J.A.R.V.I.S. AI assistant'}
+              title="J.A.R.V.I.S. assistant" aria-expanded={chat.open}
+              onClick={() => setChat(c => ({ ...c, open: !c.open }))}>
+              <ReactorMark /><span className="launcher-label">AI assistant</span>
+            </button>
+          </div>
+        </div>
       </header>
 
       <div className="cols">
         <aside>
           <div className="panel pad">
-            <div className="sec-title">FAILURE INJECTION</div>
+            <div className="sec-title">Sample incidents</div>
             {FAULTS.map(([id, label, note]) => (
               <button key={id} className="inject" onClick={() => inject(id)} disabled={!!fault}>
                 <b>{label}</b><span>{note}</span>
               </button>
             ))}
-            <button className="clearbtn" onClick={() => inject('clear')}>Resolve / clear</button>
+            <button className="clearbtn" onClick={() => inject('clear')}>Resolve and clear</button>
           </div>
           <div className="panel grow">
-            <div className="sec-title pad-h">LIVE ALERT FEED <span className="muted">(raw, uncorrelated)</span></div>
+            <div className="sec-title pad-h">Alert feed <span className="muted">· incoming service events</span></div>
             <div className="feed" ref={feedRef}>
               {feed.map(ev => (
                 <div key={ev.id} className={`frow2 ${ev.anomalous ? 'anom' : ''}`} onMouseEnter={() => setHighlight(ev.service)}>
                   <span className="fdot" style={{ background: SEV_COLOR[ev.severity] }} />
-                  <span className="ftime">{ev.timestamp}</span>
-                  <span className="fsvc">{ev.service}</span>
-                  <span className="ftype">{ev.event_type}</span>
-                  {ev.anomalous && <span className="fz">σ{ev.z}</span>}
+                  <div className="fdetails">
+                    <div className="fmeta"><span className="ftime">{ev.timestamp}</span><span className="fsvc">{serviceName(ev.service)}</span>
+                      <span className="ftype">{EVENT_LABEL[ev.event_type] || ev.event_type.replaceAll('_', ' ')}</span>
+                      {ev.anomalous && <span className="fz">{ev.z}σ</span>}
+                    </div>
+                    <div className="fmessage">{ev.message}</div>
+                  </div>
                 </div>
               ))}
               {!feed.length && <div className="muted pad">Waiting for alerts…</div>}
@@ -200,18 +241,22 @@ export default function App() {
 
         <main>
           <div className="panel graph-wrap">
-            <div className="sec-title pad-h">SERVICE DEPENDENCY GRAPH {incident && <span className="muted">· incident {incident.id}</span>}</div>
+            <div className="sec-title pad-h">Service dependencies {incident && <span className="muted">· {incident.id}</span>}</div>
+            <div className="graph-legend" aria-label="Graph arrow legend">
+              <span><i className="legend-line observed" />Observed alert path</span>
+              <span><i className="legend-line predicted" />Likely dependency path</span>
+            </div>
             <div className="graph"><Graph graph={state.graph} incident={incident} highlight={highlight} /></div>
           </div>
           <div className="panel">
-            <div className="sec-title pad-h">INCIDENT TIMELINE <span className="muted">· cascade, trigger marked</span></div>
+            <div className="sec-title pad-h">Incident timeline</div>
             {incident ? <Timeline incident={incident} onHighlight={setHighlight} /> : <div className="muted pad">No active incident.</div>}
           </div>
         </main>
 
         <aside className="right">
           <div className="panel pad">
-            <div className="sec-title">ROOT CAUSE ANALYSIS</div>
+            <div className="sec-title">Incident analysis</div>
             <RootCausePanel incident={incident} onHighlight={setHighlight} />
             <a className={`report ${incident ? '' : 'disabled'}`}
               href={incident ? `/api/incidents/${incident.id}/report.md` : undefined}
@@ -223,30 +268,6 @@ export default function App() {
         </aside>
       </div>
 
-      <div className="assistant-dock">
-        {chat.open && <section className="chat" aria-label="Ask J.A.R.V.I.S.">
-          <div className="chat-head">
-            <div>ASK J.A.R.V.I.S.<span className="muted chat-subtitle">{chat.msgs.length ? ` · ${chat.msgs.filter(m => !m.me).at(-1)?.mode === 'llm' ? 'LLM · grounded' : 'template · grounded'}` : ' · Answers from incident findings'}</span></div>
-            <button className="chat-close" type="button" aria-label="Close assistant" onClick={() => setChat(c => ({ ...c, open: false }))}>×</button>
-          </div>
-          <div className="chat-body" id="chat-body">
-          {chat.msgs.map((m, i) => <div key={i} className={`msg ${m.me ? 'me' : ''}`}>{MD(m.text)}</div>)}
-          {chat.busy && <div className="msg muted">analysing findings…</div>}
-          <div className="sugs">
-            {['What should I check first?', 'What is the root cause?', 'Which services were affected?', 'Show the timeline', 'How is confidence computed?'].map(s =>
-              <button key={s} onClick={() => ask(s)} disabled={chat.busy}>{s}</button>)}
-          </div>
-          <form onSubmit={e => { e.preventDefault(); const v = e.target[0].value.trim(); if (v) { ask(v); e.target.reset() } }}>
-            <input placeholder="Ask about the incident…" disabled={chat.busy} />
-          </form>
-          </div>
-        </section>}
-        <button className={`assistant-launcher ${chat.open ? 'active' : ''}`} type="button"
-          aria-label="Open J.A.R.V.I.S. assistant" aria-expanded={chat.open}
-          onClick={() => setChat(c => ({ ...c, open: !c.open }))}>
-          <ReactorMark /><span>J.A.R.V.I.S.</span>
-        </button>
-      </div>
     </div>
   )
 }

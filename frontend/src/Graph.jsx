@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { ReactFlow, Background, MarkerType, Handle, Position } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
@@ -28,6 +28,43 @@ function StatusNode({ data }) {
 const nodeTypes = { status: StatusNode }
 
 export default function Graph({ graph, incident, highlight }) {
+  const causalPlan = useMemo(() => {
+    const root = incident?.impact?.root
+    if (!root) return []
+    const depth = new Map([[root, 0]])
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const [service, dependencies] of Object.entries(graph.depends_on)) {
+        const parentDepth = dependencies.reduce((min, dependency) =>
+          depth.has(dependency) ? Math.min(min, depth.get(dependency)) : min, Infinity)
+        if (!depth.has(service) && Number.isFinite(parentDepth)) {
+          depth.set(service, parentDepth + 1)
+          changed = true
+        }
+      }
+    }
+    return Object.entries(graph.depends_on)
+      .flatMap(([service, dependencies]) => dependencies
+        .filter(dependency => depth.has(service) && depth.has(dependency))
+        .map(dependency => ({ id: `${service}->${dependency}`, depth: depth.get(service) })))
+      .sort((a, b) => a.depth - b.depth || a.id.localeCompare(b.id))
+      .map((edge, index, edges) => ({
+        ...edge,
+        delay: edge.depth === 1 ? 300 + index * 350 : 1100 + (index - edges.findIndex(item => item.depth === edge.depth)) * 350,
+      }))
+  }, [graph, incident?.impact?.root])
+  const causalPath = useMemo(() => new Set(causalPlan.map(edge => edge.id)), [causalPlan])
+  const [revealedEdges, setRevealedEdges] = useState(() => new Set())
+
+  useEffect(() => {
+    setRevealedEdges(new Set())
+    const timers = causalPlan.map(edge => window.setTimeout(() => {
+      setRevealedEdges(previous => new Set(previous).add(edge.id))
+    }, edge.delay))
+    return () => timers.forEach(window.clearTimeout)
+  }, [causalPlan])
+
   const statusMap = useMemo(() => {
     const m = {}
     if (incident) {
@@ -53,15 +90,24 @@ export default function Graph({ graph, incident, highlight }) {
     const affectedSet = new Set(incident ? incident.services_affected : [])
     return Object.entries(graph.depends_on).flatMap(([svc, deps]) =>
       deps.map(d => {
-        const hot = affectedSet.has(svc) && affectedSet.has(d)
+        const observed = affectedSet.has(svc) && affectedSet.has(d)
+        const predicted = causalPath.has(`${svc}->${d}`)
+        const shown = predicted && revealedEdges.has(`${svc}->${d}`)
+        const stroke = observed ? '#ff6b63' : shown ? '#d6aa72' : '#343837'
         return {
           id: `${svc}->${d}`, source: svc, target: d,
-          animated: hot,
-          style: { stroke: hot ? '#ff5d5d' : '#2a2d33', strokeWidth: hot ? 2 : 1.2 },
-          markerEnd: { type: MarkerType.ArrowClosed, color: hot ? '#ff5d5d' : '#2a2d33' },
+          animated: observed || shown,
+          style: {
+            stroke,
+            strokeWidth: observed ? 2 : shown ? 1.7 : 1.2,
+            opacity: predicted && !shown && !observed ? 0.3 : 1,
+            transition: 'stroke 450ms ease, stroke-width 450ms ease, opacity 450ms ease',
+            ...(shown && !observed ? { strokeDasharray: '5 5' } : {}),
+          },
+          markerEnd: { type: MarkerType.ArrowClosed, color: stroke },
         }
       }))
-  }, [graph, incident])
+  }, [graph, incident, causalPath, revealedEdges])
 
   return (
     <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes}

@@ -32,6 +32,15 @@ class Hub:
 
 HUB = Hub()
 
+async def publish_event(ev):
+    """Process and broadcast one event through the standard ingest pipeline."""
+    anomalous, changed = EN.ingest(ev)
+    db.save_event(ev, anomalous)
+    await HUB.broadcast({"type": "event", "event": ev, "metrics": EN.metrics()})
+    if changed and EN.active:
+        EN._analyze(EN.active)
+        await HUB.broadcast({"type": "incident", "incident": EN.active.to_dict()})
+
 @app.on_event("startup")
 async def startup():
     EN.baseline.prefill(time.time())
@@ -48,12 +57,7 @@ async def loop():
             fault, elapsed = S.fault_state()
             evs = S.normal_tick(time.time()) + S.fault_tick(time.time(), elapsed)
             for ev in evs:
-                anomalous, changed = EN.ingest(ev)
-                db.save_event(ev, anomalous)
-                await HUB.broadcast({"type": "event", "event": ev, "metrics": EN.metrics()})
-                if changed and EN.active:
-                    EN._analyze(EN.active)
-                    await HUB.broadcast({"type": "incident", "incident": EN.active.to_dict()})
+                await publish_event(ev)
             if not fault and EN.active:
                 EN.close_active()
                 await HUB.broadcast({"type": "incident_closed",
@@ -103,6 +107,11 @@ async def inject(scenario: str):
         return {"ok": True, "fault": None}
     name = S.inject(scenario)
     await HUB.broadcast({"type": "injected", "fault": name})
+    # Start the incident as part of the click request; the background loop then
+    # continues the normal one-second simulation stream.
+    now = time.time()
+    for ev in S.fault_tick(now, 0):
+        await publish_event(ev)
     return {"ok": True, "fault": name}
 
 # ingestion from other sources (multi-data-source feature)
