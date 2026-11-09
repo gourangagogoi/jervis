@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useMemo } from 'react'
 import { ReactFlow, Background, MarkerType, Handle, Position } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
@@ -42,9 +42,11 @@ export default function Graph({ graph, incident, highlight }) {
   }, [incident])
 
   const nodes = useMemo(() => graph.services.map(s => {
-    const st = statusMap[s] || { status: 'healthy', color: '#3a3d44', tag: 'HEALTHY' }
-    if (highlight === s) st.pulse = true
-    return { id: s, type: 'status', position: POS[s], data: { label: LABEL[s], ...st } }
+    const status = statusMap[s] || { status: 'healthy', color: '#3a3d44', tag: 'HEALTHY' }
+    return {
+      id: s, type: 'status', position: POS[s],
+      data: { label: LABEL[s], ...status, pulse: Boolean(status.pulse || highlight === s) },
+    }
   }), [graph, statusMap, highlight])
 
   const edges = useMemo(() => {
@@ -62,7 +64,8 @@ export default function Graph({ graph, incident, highlight }) {
   }, [graph, incident])
 
   return (
-    <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView
+    <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes}
+      onInit={flow => flow.fitView({ padding: 0.12, duration: 0 })}
       proOptions={{ hideAttribution: true }}
       nodesDraggable={false} nodesConnectable={false} elementsSelectable={false}
       zoomOnScroll={false} panOnScroll={false}>

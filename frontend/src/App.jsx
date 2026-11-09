@@ -14,6 +14,17 @@ const FAULTS = [
   ['auth_outage', 'Auth outage', 'Engine must blame Auth Service'],
 ]
 
+function ReactorMark() {
+  return (
+    <svg className="reactor-mark" viewBox="0 0 64 64" aria-hidden="true">
+      <circle cx="32" cy="32" r="29" />
+      <path d="M19 11 26 4h12l7 7M8 24l10-10m38 10L46 14M8 40l10 10m38-10L46 50M19 53l7 7h12l7-7" />
+      <path d="m17 21 15-8 15 8-15 27-15-27Zm5 1h20L32 40 22 22Zm10-8v9m0 17v8M11 32h9m24 0h9" />
+      <path d="m24 25 8 13 8-13" />
+    </svg>
+  )
+}
+
 function Ring({ pct }) {
   const r = 34, c = 2 * Math.PI * r
   return (
@@ -30,7 +41,7 @@ function Ring({ pct }) {
 }
 
 function RootCausePanel({ incident, onHighlight }) {
-  if (!incident) return <div className="panel pad muted">No incident. Platform is calm — inject a fault to see the engine reason.</div>
+  if (!incident) return <div className="pad muted">No active incident. Inject a fault to see the engine analyze it.</div>
   const top = incident.candidates[0]
   const p = incident.pattern || {}
   const imp = incident.impact
@@ -202,17 +213,23 @@ export default function App() {
           <div className="panel pad">
             <div className="sec-title">ROOT CAUSE ANALYSIS</div>
             <RootCausePanel incident={incident} onHighlight={setHighlight} />
-            {incident && <a className="report" href={`/api/incidents/${incident.id}/report.md`} target="_blank" rel="noreferrer">↓ Export incident report (Markdown)</a>}
+            <a className={`report ${incident ? '' : 'disabled'}`}
+              href={incident ? `/api/incidents/${incident.id}/report.md` : undefined}
+              download={incident ? `${incident.id}-report.md` : undefined}
+              aria-disabled={!incident} tabIndex={incident ? 0 : -1}>
+              ↓ Export incident report
+            </a>
           </div>
         </aside>
       </div>
 
-      <div className={`chat ${chat.open ? 'open' : ''}`}>
-        <div className="chat-head" onClick={() => setChat(c => ({ ...c, open: !c.open }))}>
-          ASK J.A.R.V.I.S. <span className="muted">{chat.msgs.length ? `· ${chat.msgs.filter(m => !m.me).at(-1)?.mode === 'llm' ? 'LLM · grounded' : 'template · grounded'}` : '· answers only from engine findings, cites event IDs'}</span>
-          <span className="chev">{chat.open ? '▾' : '▴'}</span>
-        </div>
-        {chat.open && <div className="chat-body">
+      <div className="assistant-dock">
+        {chat.open && <section className="chat" aria-label="Ask J.A.R.V.I.S.">
+          <div className="chat-head">
+            <div>ASK J.A.R.V.I.S.<span className="muted chat-subtitle">{chat.msgs.length ? ` · ${chat.msgs.filter(m => !m.me).at(-1)?.mode === 'llm' ? 'LLM · grounded' : 'template · grounded'}` : ' · Answers from incident findings'}</span></div>
+            <button className="chat-close" type="button" aria-label="Close assistant" onClick={() => setChat(c => ({ ...c, open: false }))}>×</button>
+          </div>
+          <div className="chat-body" id="chat-body">
           {chat.msgs.map((m, i) => <div key={i} className={`msg ${m.me ? 'me' : ''}`}>{MD(m.text)}</div>)}
           {chat.busy && <div className="msg muted">analysing findings…</div>}
           <div className="sugs">
@@ -222,7 +239,13 @@ export default function App() {
           <form onSubmit={e => { e.preventDefault(); const v = e.target[0].value.trim(); if (v) { ask(v); e.target.reset() } }}>
             <input placeholder="Ask about the incident…" disabled={chat.busy} />
           </form>
-        </div>}
+          </div>
+        </section>}
+        <button className={`assistant-launcher ${chat.open ? 'active' : ''}`} type="button"
+          aria-label="Open J.A.R.V.I.S. assistant" aria-expanded={chat.open}
+          onClick={() => setChat(c => ({ ...c, open: !c.open }))}>
+          <ReactorMark /><span>J.A.R.V.I.S.</span>
+        </button>
       </div>
     </div>
   )

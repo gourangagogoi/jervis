@@ -80,7 +80,13 @@ cd backend
 
 #### Optional: configuration via `.env`
 
-Copy the template and edit it (`.env` is git-ignored, so keys stay private):
+You do not need an `.env` file or an API key to run or present the prototype. The
+built-in assistant uses deterministic, engine-grounded responses by default. Keep
+`.env.example` in the project as a safe configuration template for future development
+or the final round. If you create a real `.env` with an API key, keep it private and
+do not include it when sharing or submitting the project; `.env` is git-ignored.
+
+To enable optional LLM-powered chat during development, copy the template and edit it:
 
 ```bash
 cp .env.example .env      # Windows: copy .env.example .env
@@ -92,7 +98,7 @@ cp .env.example .env      # Windows: copy .env.example .env
 | `LLM_MODEL` | Override the model (default `gpt-4o-mini`) |
 | `NEXUS_DB` | SQLite file location (default `backend/nexus.db`) |
 
-Everything is optional — the app runs fully with no `.env` at all.
+All settings are optional — the app runs fully with no `.env` at all.
 
 ## Troubleshooting
 
