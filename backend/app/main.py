@@ -67,7 +67,9 @@ async def loop():
 # ------------------------------------------------------------------- REST API
 @app.get("/api/state")
 def state():
-    inc = EN.active.to_dict() if EN.active else (EN.incidents[-1].to_dict() if EN.incidents else None)
+    # The dashboard displays the active incident. Resolved incidents remain
+    # available through /api/incidents and their report endpoints.
+    inc = EN.active.to_dict() if EN.active else None
     return {"graph": {"services": E.SERVICES, "depends_on": E.DEPENDS_ON},
             "incident": inc, "metrics": EN.metrics(),
             "fault": S.fault_state()[0],
@@ -97,6 +99,7 @@ async def inject(scenario: str):
     if scenario == "clear":
         S.clear()
         EN.close_active()
+        await HUB.broadcast({"type": "cleared", "metrics": EN.metrics()})
         return {"ok": True, "fault": None}
     name = S.inject(scenario)
     await HUB.broadcast({"type": "injected", "fault": name})

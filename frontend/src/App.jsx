@@ -110,7 +110,15 @@ export default function App() {
   const [chat, setChat] = useState({ open: false, msgs: [], busy: false })
   const feedRef = useRef(null)
 
-  const inject = async (s) => { await $(`/api/inject/${s}`, { method: 'POST' }); if (s === 'clear') setIncident(null) }
+  const inject = async (s) => {
+    const result = await $(`/api/inject/${s}`, { method: 'POST' })
+    if (s === 'clear') {
+      setIncident(null)
+      setFault(result.fault)
+      setFeed([])
+      setHighlight(null)
+    }
+  }
 
   useEffect(() => {
     $('/api/state').then(s => { setState(s); setMetrics(s.metrics); setFault(s.fault); if (s.incident) setIncident(s.incident) })
@@ -123,6 +131,7 @@ export default function App() {
         if (m.event.severity !== 'INFO') setFeed(f => [m.event, ...f].slice(0, 80))
       } else if (m.type === 'incident') { setIncident(m.incident) }
       else if (m.type === 'incident_closed') { setIncident(m.incident); setMetrics(m.metrics) }
+      else if (m.type === 'cleared') { setIncident(null); setFault(null); setFeed([]); setHighlight(null); setMetrics(m.metrics) }
       else if (m.type === 'injected') setFault(m.fault)
     }
     return () => ws.close()
